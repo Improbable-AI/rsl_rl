@@ -45,7 +45,7 @@ class PPO_aux_loss(PPO):
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+            old_mu_batch, old_sigma_batch, aux_targets_batch, hid_states_batch, masks_batch in generator:
 
 
                 self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
@@ -89,7 +89,8 @@ class PPO_aux_loss(PPO):
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # Auxiliary loss
-                aux_loss = 0
+                aux_predictions = self.aux_network.forward(aux_targets_batch)
+                aux_loss = torch.sum(aux_targets_batch * torch.log(aux_predictions) + (1 - aux_targets_batch) * torch.log(1 - aux_predictions), dim=1)
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + self.aux_loss_coef * aux_loss
 

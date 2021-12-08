@@ -36,6 +36,8 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
+from ml_logger import logger
+
 from rsl_rl.algorithms import PPO
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
 from rsl_rl.env import VecEnv
@@ -82,8 +84,40 @@ class OnPolicyRunner:
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
-        if self.log_dir is not None and self.writer is None:
+        if self.log_dir is not None and self.writer is None and self.cfg["use_tensorboard"]: # tensorboard
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+        elif not self.cfg["use_tensorboard"]: # ml_logger
+            assert logger.prefix, "you will overwrite the entire instrument server"
+            if logger.read_params('job.completionTime', default=None):
+                logger.print("The job seems to have been already completed!!!")
+                return
+            logger.start('update_job_status')
+            logger.start('start', 'episode', 'run', 'step')
+
+            if logger.glob('progress.pkl'):
+                try:
+                    # Use current config for some args
+                    keep_args = ['checkpoint_root', 'time_limit', 'checkpoint_freq', 'tmp_dir']
+                    Args._update({key: val for key, val in logger.read_params("Args").items() if key not in keep_args})
+                except KeyError as e:
+                    print('Captured KeyError during Args update.', e)
+
+                agent, replay_buffer, progress_cache = load_checkpoint()
+                Progress._update(progress_cache)
+                logger.timer_cache['start'] = logger.timer_cache['start'] - Progress.wall_time
+                logger.print(f'loaded from checkpoint at {Progress.episode}', color="green")
+
+            else:
+                Args._update(kwargs)
+                logger.log_params(Args=vars(Args))
+                logger.log_text("""
+                    charts:
+                    - yKey: train/episode_reward/mean
+                      xKey: step
+                    - yKey: eval/episode_reward
+                      xKey: step
+                    """, filename=".charts.yml", dedent=True, overwrite=True)
+
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         obs = self.env.get_observations()
@@ -146,37 +180,15 @@ class OnPolicyRunner:
         self.tot_time += locs['collection_time'] + locs['learn_time']
         iteration_time = locs['collection_time'] + locs['learn_time']
 
-        ep_string = f''
-        if locs['ep_infos']:
-            for key in locs['ep_infos'][0]:
-                infotensor = torch.tensor([], device=self.device)
-                for ep_info in locs['ep_infos']:
-                    # handle scalar and zero dimensional tensor infos
-                    if not isinstance(ep_info[key], torch.Tensor):
-                        ep_info[key] = torch.Tensor([ep_info[key]])
-                    if len(ep_info[key].shape) == 0:
-                        ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-                value = torch.mean(infotensor)
-                self.writer.add_scalar('Episode/' + key, value, locs['it'])
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
-        mean_std = self.alg.actor_critic.std.mean()
-        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
-
-        self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
-        self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
-        self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
-        self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
-        self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
-        self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
-        self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
-        if len(locs['rewbuffer']) > 0:
-            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
-            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
-            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+        if self.cfg["use_tensorboard"]:
+            ep_string = self.log_tensorboard(locs, width=width, pad=pad)
+        else:
+            ep_string = self.log_ml_logger(locs, width=width, pad=pad)
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        
+        mean_std = self.alg.actor_critic.std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
@@ -209,6 +221,82 @@ class OnPolicyRunner:
                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
         print(log_string)
+
+    def log_tensorboard(self, locs, width=80, pad=35):
+        ep_string = f''
+        if locs['ep_infos']:
+            for key in locs['ep_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in locs['ep_infos']:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                self.writer.add_scalar('Episode/' + key, value, locs['it'])
+                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        mean_std = self.alg.actor_critic.std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
+
+        self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
+        self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+        self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
+        self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
+        self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
+        self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
+        self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
+        if len(locs['rewbuffer']) > 0:
+            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
+            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
+
+        return ep_string
+
+    def log_ml_logger(self, locs, width=80, pad=35):
+        print("logging with ml-logger")
+
+        log_dict = {}
+        log_dict['it'] = locs['it']
+
+        ep_string = f''
+        if locs['ep_infos']:
+            for key in locs['ep_infos'][0]:
+                infotensor = torch.tensor([], device=self.device)
+                for ep_info in locs['ep_infos']:
+                    # handle scalar and zero dimensional tensor infos
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+                value = torch.mean(infotensor)
+                log_dict['Episode/' + key] =  value
+                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        mean_std = self.alg.actor_critic.std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
+
+        log_dict['Loss/value_function'] = locs['mean_value_loss']
+        log_dict['Loss/surrogate'] = locs['mean_surrogate_loss']
+        log_dict['Loss/learning_rate'] = self.alg.learning_rate
+        log_dict['Policy/mean_noise_std'] = mean_std.item()
+        log_dict['Perf/total_fps'] = fps
+        log_dict['Perf/collection time'] = locs['collection_time']
+        log_dict['Perf/learning_time'] = locs['learn_time']
+        
+        if len(locs['rewbuffer']) > 0:
+            log_dict['Train/mean_reward'] = statistics.mean(locs['rewbuffer'])
+            log_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
+            log_dict['Train/mean_reward/time'] = statistics.mean(locs['rewbuffer'])
+            log_dict['Train/mean_episode_length/time'] = statistics.mean(locs['lenbuffer'])
+            log_dict['tot_time'] = self.tot_time
+
+        logger.store_metrics(log_dict)
+
+        return ep_string
+
 
     def save(self, path, infos=None):
         torch.save({
