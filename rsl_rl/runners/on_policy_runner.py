@@ -42,6 +42,14 @@ from rsl_rl.algorithms import PPO
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
 from rsl_rl.env import VecEnv
 
+from params_proto.neo_proto import PrefixProto
+
+class Progress(PrefixProto, cli=False):
+    step = 0
+    episode = 0
+    wall_time = 0
+    frame = 0
+
 
 class OnPolicyRunner:
 
@@ -299,15 +307,104 @@ class OnPolicyRunner:
 
 
     def save(self, path, infos=None):
-        torch.save({
+        
+        dict_to_save = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,
-            }, path)
+            }
+
+        if self.cfg.ml_logger:
+            #from .config import Args
+            logger.pring('saving & uploading snapshot...')
+            replay_path = pJoin(Args.checkpoint_root, logger.prefix, 'replay.pt')
+            snapshot_target = pJoin(Args.checkpoint_root, logger.prefix, 'snapshot_in_progress.pt')
+            logger.save_torch(dict_to_save, path=snapshot_target)
+
+            logger.duplicate("metrics.pkl", "metrics_latest.pkl")
+            logger.print('saving buffer to', replay_path)
+
+            # NOTE: It seems tempfile cannot handle this 20GB+ file.
+            logger.start('upload_replay_buffer')
+
+            if replay_path.startswith('file://'):
+                replay_path = replay_path[7:]
+                Path(replay_path).resolve().parents[0].mkdir(parents=True, exist_ok=True)
+                with open(replay_path, 'wb') as f:
+                    cloudpickle.dump(replay, f)
+            elif replay_path.startswith('s3://') or replay_path.startswith('gs://'):
+                logger.print('uploading buffer to', replay_path)
+                tmp_path = Path(Args.tmp_dir) / logger.prefix / 'replay.pt'
+                tmp_path.parents[0].mkdir(parents=True, exist_ok=True)
+                with open(tmp_path, 'wb') as f:
+                    cloudpickle.dump(replay, f)
+
+                if replay_path.startswith('s3://'):
+                    logger.upload_s3(str(tmp_path), path=replay_path[5:])
+                else:
+                    logger.upload_gs(str(tmp_path), path=replay_path[5:])
+            else:
+                ValueError('replay_path must start with s3://, gs:// or file://. Not', replay_path)
+
+            elapsed = logger.since('upload_replay_buffer')
+            logger.print(f'Uploading replay buffer took {elapsed} seconds')
+
+            # Save the progress.pkl last as a fail-safe. To make sure the checkpoints are saving correctly.
+            logger.log_params(Progress=vars(Progress), path="progress.pkl", silent=True)
+
+        else:
+            torch.save(dict_to_save, path)
 
     def load(self, path, load_optimizer=True):
-        loaded_dict = torch.load(path)
+        if self.cfg.ml_logger:
+            from .config import Args
+            from ml_logger import logger
+            import torch
+
+            # TODO: check if both checkpoint & replay buffer exist
+            snapshot_path = os.path.join(Args.checkpoint_root, logger.prefix, 'snapshot_in_progress.pt')
+            replay_path = os.path.join(Args.checkpoint_root, logger.prefix, 'replay.pt')
+            assert logger.glob(snapshot_path) and logger.glob(replay_path) and logger.glob('progress.pkl') and logger.glob('metrics_latest.pkl')
+
+            logger.print('loading agent from', snapshot_path)
+            loaded_dict = logger.load_torch(snapshot_path)
+
+            # Load replay buffer
+            logger.print('loading from checkpoint (replay)', replay_path)
+
+            # NOTE: It seems tempfile cannot handle this 20GB+ file.
+            logger.start('download_replay_buffer')
+            if replay_path.startswith('file://'):
+                import cloudpickle
+                with open(replay_path[7:], 'rb') as f:
+                    replay = cloudpickle.load(f)
+            elif replay_path.startswith('s3://') or replay_path.startswith('gs://'):
+                import cloudpickle
+                tmp_path = Path(Args.tmp_dir) / logger.prefix / 'replay.pt'
+                tmp_path.parents[0].mkdir(parents=True, exist_ok=True)
+
+                if replay_path.startswith('s3://'):
+                    logger.download_s3(path=replay_path[5:], to=str(tmp_path))
+                else:
+                    logger.download_gs(path=replay_path[5:], to=str(tmp_path))
+                with open(tmp_path, 'rb') as f:
+                    replay = cloudpickle.load(f)
+            else:
+                ValueError('replay_path must start with s3://, gs:// or file://. Not', replay_path)
+
+            elapsed = logger.since('download_replay_buffer')
+            logger.print(f'Download completed. It took {elapsed} seconds')
+
+            logger.duplicate("metrics_latest.pkl", to="metrics.pkl")
+            logger.print('done')
+
+            params = logger.read_params(path="progress.pkl")
+
+        else:
+            loaded_dict = torch.load(path)
+
+
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
