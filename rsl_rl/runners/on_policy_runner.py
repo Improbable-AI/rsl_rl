@@ -95,6 +95,9 @@ class OnPolicyRunner:
         if self.log_dir is not None and self.writer is None and self.cfg["use_tensorboard"]: # tensorboard
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
         elif not self.cfg["use_tensorboard"]: # ml_logger
+            #logger.configure('/tmp/ml-logger-debug')
+            input(logger.prefix)
+
             assert logger.prefix, "you will overwrite the entire instrument server"
             if logger.read_params('job.completionTime', default=None):
                 logger.print("The job seems to have been already completed!!!")
