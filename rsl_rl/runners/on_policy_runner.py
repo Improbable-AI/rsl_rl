@@ -89,7 +89,7 @@ class OnPolicyRunner:
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
-        if self.log_dir is not None and self.writer is None and self.cfg["use_ml_logger"]: # tensorboard
+        if self.log_dir is not None and self.writer is None and not self.cfg["use_ml_logger"]: # tensorboard
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
         elif self.cfg["use_ml_logger"]: # ml_logger
             assert logger.prefix, "you will overwrite the entire instrument server"
