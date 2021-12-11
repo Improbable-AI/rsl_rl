@@ -1,4 +1,5 @@
-from rsl_rl.algorithms.ppo import PPO
+from ppo import PPO
+import torch
 
 class PPO_aux_loss(PPO):
 	def __init__(self,
