@@ -82,7 +82,7 @@ class OnPolicyRunner:
 
         # ml-logger
         if self.cfg["use_ml_logger"]:
-            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.cfg["prefix"], register_experiment=False, silent=True)
+            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.cfg["prefix"], register_experiment=False, silent=False)
 
 
         _, _ = self.env.reset()
