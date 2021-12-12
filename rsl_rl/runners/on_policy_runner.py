@@ -82,7 +82,7 @@ class OnPolicyRunner:
 
         # ml-logger
         if self.cfg["use_ml_logger"]:
-            logger.configure(prefix=self.cfg["prefix"], register_experiment=False, silent=True)
+            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.cfg["prefix"], register_experiment=False, silent=True)
 
 
         _, _ = self.env.reset()
@@ -93,35 +93,13 @@ class OnPolicyRunner:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
         elif self.cfg["use_ml_logger"]: # ml_logger
             assert logger.prefix, "you will overwrite the entire instrument server"
-            if logger.read_params('job.completionTime', default=None):
-                logger.print("The job seems to have been already completed!!!")
-                return
-            logger.start('update_job_status')
+            #if logger.read_params('job.completionTime', default=None):
+            #    logger.print("The job seems to have been already completed!!!")
+            #    return
+            #logger.start('update_job_status')
             logger.start('start', 'episode', 'run', 'step')
 
-            if logger.glob('progress.pkl'):
-                try:
-                    # Use current config for some args
-                    keep_args = ['checkpoint_root', 'time_limit', 'checkpoint_freq', 'tmp_dir']
-                    Args._update({key: val for key, val in logger.read_params("Args").items() if key not in keep_args})
-                except KeyError as e:
-                    print('Captured KeyError during Args update.', e)
 
-                agent, replay_buffer, progress_cache = load_checkpoint()
-                Progress._update(progress_cache)
-                logger.timer_cache['start'] = logger.timer_cache['start'] - Progress.wall_time
-                logger.print(f'loaded from checkpoint at {Progress.episode}', color="green")
-
-            else:
-                Args._update(kwargs)
-                logger.log_params(Args=vars(Args))
-                logger.log_text("""
-                    charts:
-                    - yKey: train/episode_reward/mean
-                      xKey: step
-                    - yKey: eval/episode_reward
-                      xKey: step
-                    """, filename=".charts.yml", dedent=True, overwrite=True)
 
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
