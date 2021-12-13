@@ -36,6 +36,7 @@ import statistics
 import torch
 
 from ml_logger import logger
+from ml_logger import instr
 
 from rsl_rl.algorithms import PPO
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
@@ -97,6 +98,7 @@ class OnPolicyRunner:
             #    logger.print("The job seems to have been already completed!!!")
             #    return
             #logger.start('update_job_status')
+            logger.print("starting...")
             logger.start('start', 'episode', 'run', 'step')
 
 
@@ -283,6 +285,19 @@ class OnPolicyRunner:
             log_dict['tot_time'] = self.tot_time
 
         logger.store_metrics(log_dict)
+        logger.log_metrics_summary(key_values=log_dict)
+
+        logger.log_params(Args=self.cfg)
+
+        logger.log(loss=locs['mean_value_loss'], step=locs['it'])
+        logger.log_text('charts: [{"yKey": "loss", "xKey": "step"}]',
+                    ".charts.yml")
+
+        frames = self.env.get_frames()
+
+        if len(frames) > 0:
+            #input("LOGGING VIDEO")
+            logger.save_video(frames, "test_video.mp4")
 
         return ep_string
 
