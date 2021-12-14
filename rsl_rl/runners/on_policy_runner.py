@@ -304,7 +304,7 @@ class OnPolicyRunner:
         if len(frames) > 0:
             self.env.pause_recording()
             print("LOGGING VIDEO")
-            logger.save_video(frames, f"recording_{locs['it']}.mp4", framerate=1/self.env.dt)
+            logger.save_video(frames, f"recording_{locs['it']}.mp4", fps=1/self.env.dt)
             self.last_recording_it = locs['it']
 
         logger.log(step=locs['it'], flush=True)
