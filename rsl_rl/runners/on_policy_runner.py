@@ -88,17 +88,19 @@ class OnPolicyRunner:
         # ml-logger
         if self.cfg["use_ml_logger"]:
 
-            self.ml_logger_prefix = self.cfg["prefix"] + "/" + self.cfg["run_name"] + "/" + self.cfg["experiment_name"]   
+            self.ml_logger_prefix = self.cfg["prefix"] + "/" + self.cfg["experiment_name"] + "/" + self.cfg["run_name"]  
             logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.ml_logger_prefix, silent=False)
 
-            # logger.log_text("""
-            # charts: 
-            # - yKey: loss
-            # - xKey: step
-            # """,
-            # filename=".charts.yml",
-            # dedent=True,
-            # overwrite=True)
+            logger.log_text("""
+            charts: 
+            - yKey: Train/mean_reward
+              xKey: it
+            - yKey: Episode/rew_clipped_forward_progress
+              xKey: it
+            """,
+            filename=".charts.yml",
+            dedent=True,
+            overwrite=True)
 
             logger.log_params(Args=self.cfg)
 
@@ -274,7 +276,7 @@ class OnPolicyRunner:
                         ep_info[key] = ep_info[key].unsqueeze(0)
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
-                log_dict['Episode/' + key] =  value
+                log_dict['Episode/' + key] =  float(value)
                 ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
@@ -294,10 +296,16 @@ class OnPolicyRunner:
             log_dict['Train/mean_episode_length/time'] = statistics.mean(locs['lenbuffer'])
             log_dict['tot_time'] = self.tot_time
 
-        logger.store_metrics(log_dict)
-        logger.log_metrics(log_dict)
+        print(log_dict)
 
-        logger.log(loss=locs['mean_value_loss'], step=locs['it'])
+
+        logger.store_metrics(log_dict)
+        logger.log(metrics=log_dict, flush=True)
+
+        #logger.log(metrics={"loss": locs['mean_value_loss'], "step":locs['it']}, flush=True)
+
+        #logger.log(metrics={"mean_value_loss": locs['mean_value_loss'], "it":locs['it']}, flush=True)
+
 
         #print(len(frames), locs['dones'][0:100], locs['dones'].shape)
 
@@ -313,7 +321,9 @@ class OnPolicyRunner:
             logger.save_video(frames, f"recording_{locs['it']}.mp4", fps=1/self.env.dt)
             
 
-        logger.log(step=locs['it'], flush=True)
+        #logger.log(step=locs['it'], flush=True)
+
+        logger.flush()
 
         return ep_string
 
