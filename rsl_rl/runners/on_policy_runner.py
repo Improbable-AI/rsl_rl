@@ -298,7 +298,11 @@ class OnPolicyRunner:
         #print(len(frames), locs['dones'][0:100], locs['dones'].shape)
 
         if self.cfg["save_video"] and locs['it'] - self.last_recording_it >= self.cfg["save_video_interval"]:
-            frames = self.env.get_complete_frames()
+            frames = self.env.start_recording()
+
+        frames = self.env.get_complete_frames()
+        if len(frames) > 0:
+            self.env.pause_recording()
             print("LOGGING VIDEO")
             logger.save_video(frames, f"recording_{locs['it']}.mp4", framerate=1/self.env.dt)
             self.last_recording_it = locs['it']
