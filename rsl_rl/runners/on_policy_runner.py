@@ -74,7 +74,11 @@ class OnPolicyRunner:
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions])
 
         # Log
-        self.log_dir = log_dir
+        if self.cfg["use_ml_logger"]:
+            self.log_dir = ""
+        else:
+            self.log_dir = log_dir
+
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
@@ -83,9 +87,20 @@ class OnPolicyRunner:
 
         # ml-logger
         if self.cfg["use_ml_logger"]:
-            self.ml_logger_prefix = self.cfg["prefix"] + "/" + self.cfg["run_name"] + "/" + self.cfg["experiment_name"]
+
+            self.ml_logger_prefix = self.cfg["prefix"] + "/" + self.cfg["run_name"] + "/" + self.cfg["experiment_name"]   
             logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.ml_logger_prefix, silent=False)
 
+            # logger.log_text("""
+            # charts: 
+            # - yKey: loss
+            # - xKey: step
+            # """,
+            # filename=".charts.yml",
+            # dedent=True,
+            # overwrite=True)
+
+            logger.log_params(Args=self.cfg)
 
         _, _ = self.env.reset()
     
@@ -156,17 +171,11 @@ class OnPolicyRunner:
             if self.log_dir is not None:
                 self.log(locals())
             if it % self.save_interval == 0:
-                if self.cfg["use_ml_logger"]:
-                    pass # SAVE MODEL TO ML_LOGGER
-                else:
-                    self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
             ep_infos.clear()
         
         self.current_learning_iteration += num_learning_iterations
-        if self.cfg["use_ml_logger"]:
-            pass # SAVE MODEL TO ML_LOGGER
-        else:
-            self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
@@ -249,8 +258,7 @@ class OnPolicyRunner:
         return ep_string
 
     def log_ml_logger(self, locs, width=80, pad=35):
-        print("logging with ml-logger")
-
+        
         log_dict = {}
         log_dict['it'] = locs['it']
 
@@ -289,23 +297,21 @@ class OnPolicyRunner:
         logger.store_metrics(log_dict)
         logger.log_metrics(log_dict)
 
-        logger.log_params(Args=self.cfg)
-
         logger.log(loss=locs['mean_value_loss'], step=locs['it'])
-        logger.log_text('charts: [{"yKey": "loss", "xKey": "step"}]',
-                    ".charts.yml")
 
         #print(len(frames), locs['dones'][0:100], locs['dones'].shape)
 
         if self.cfg["save_video"] and locs['it'] - self.last_recording_it >= self.cfg["save_video_interval"]:
-            frames = self.env.start_recording()
+            self.env.start_recording()
+            print("START RECORDING")
+            self.last_recording_it = locs['it']
 
         frames = self.env.get_complete_frames()
         if len(frames) > 0:
             self.env.pause_recording()
             print("LOGGING VIDEO")
             logger.save_video(frames, f"recording_{locs['it']}.mp4", fps=1/self.env.dt)
-            self.last_recording_it = locs['it']
+            
 
         logger.log(step=locs['it'], flush=True)
 
@@ -313,9 +319,21 @@ class OnPolicyRunner:
 
     def save(self, path, infos=None):
         if self.cfg["use_ml_logger"]:
-            logger.save_torch(self.alg, path=self.ml_logger_prefix + f'/model_{self.current_learning_iteration}.pt')
-            logger.duplicate(self.ml_logger_prefix + f'/model_{self.current_learning_iteration}.pt',
-                             self.ml_logger_prefix + "/agent.pt")
+            print(f"SAVE MODEL {path}")
+            logger.save_pkl({
+                'model_state_dict': self.alg.actor_critic.state_dict(),
+                'optimizer_state_dict': self.alg.optimizer.state_dict(),
+                'iter': self.current_learning_iteration,
+                'infos': infos,
+                }, path=path)
+            #logger.save_module(self.alg.actor_critic, path=f'/model_state_dict_{self.current_learning_iteration}.pt')
+            #logger.save_module(self.alg.optimizer, path=f'/optimizer_state_dict_{self.current_learning_iteration}.pt')
+            #logger.duplicate(self.ml_logger_prefix + f'/model_state_dict_{self.current_learning_iteration}.pt',
+            #                 self.ml_logger_prefix + "/model_state_dict_last.pt")
+            #logger.duplicate(self.ml_logger_prefix + f'/optimizer_state_dict_{self.current_learning_iteration}.pt',
+            #                 self.ml_logger_prefix + "/optimizer_state_dict_last.pt")
+            logger.duplicate(path,
+                             "ckpt_last.pt")
         else:
             torch.save({
                 'model_state_dict': self.alg.actor_critic.state_dict(),
@@ -326,7 +344,20 @@ class OnPolicyRunner:
 
     def load(self, path, load_optimizer=True):
         if self.cfg["use_ml_logger"]:
-            loaded_dict = logger.load_torch(path=self.ml_logger_prefix + f'/agent.pt')
+            # model_state_dict = logger.load_torch(path=f'/model_state_dict_last.pt')
+            # self.alg.actor_critic.load_state_dict(model_state_dict)
+            # if load_optimizer:
+            #     optimizer_state_dict = logger.load_torch(path=f'/optimizer_state_dict_last.pt')
+            #     self.alg.optimizer.load_state_dict(optimizer_state_dict)
+            # return {}
+            checkpoints = logger.glob(query="model_*.pt")
+            print(checkpoints)
+            checkpoints.sort()
+            checkpoint = checkpoints[-1]
+            print(checkpoint)
+            loaded_dict = logger.load_pkl(checkpoint)[0]
+            #print(loaded_dict)
+
         else:
             loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
