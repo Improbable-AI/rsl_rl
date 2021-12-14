@@ -97,6 +97,8 @@ class OnPolicyRunner:
               xKey: it
             - yKey: Episode/rew_clipped_forward_progress
               xKey: it
+            - yKey: Episode/terrain_level
+              xKey: it
             """,
             filename=".charts.yml",
             dedent=True,
