@@ -79,10 +79,11 @@ class OnPolicyRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
+        self.last_recording_it = 0
 
         # ml-logger
         if self.cfg["use_ml_logger"]:
-            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.cfg["prefix"], register_experiment=False, silent=False)
+            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.cfg["prefix"] + "/" + self.cfg["run_name"] + "/" + self.cfg["experiment_name"], register_experiment=False, silent=False)
 
 
         _, _ = self.env.reset()
@@ -285,7 +286,7 @@ class OnPolicyRunner:
             log_dict['tot_time'] = self.tot_time
 
         logger.store_metrics(log_dict)
-        logger.log_metrics_summary(key_values=log_dict)
+        #logger.log_metrics_summary(key_values=log_dict)
 
         logger.log_params(Args=self.cfg)
 
@@ -293,11 +294,15 @@ class OnPolicyRunner:
         logger.log_text('charts: [{"yKey": "loss", "xKey": "step"}]',
                     ".charts.yml")
 
-        frames = self.env.get_frames()
+        #print(len(frames), locs['dones'][0:100], locs['dones'].shape)
 
-        if len(frames) > 0:
-            #input("LOGGING VIDEO")
-            logger.save_video(frames, "test_video.mp4")
+        if self.cfg["save_video"] and locs['it'] - self.last_recording_it >= self.cfg["save_video_interval"]:
+            frames = self.env.get_complete_frames()
+            print("LOGGING VIDEO")
+            logger.save_video(frames, f"recording_{locs['it']}.mp4", framerate=1/self.env.dt)
+            self.last_recording_it = locs['it']
+
+        logger.log(step=locs['it'], flush=True)
 
         return ep_string
 
