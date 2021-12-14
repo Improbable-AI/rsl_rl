@@ -83,7 +83,8 @@ class OnPolicyRunner:
 
         # ml-logger
         if self.cfg["use_ml_logger"]:
-            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.cfg["prefix"] + "/" + self.cfg["run_name"] + "/" + self.cfg["experiment_name"], register_experiment=False, silent=False)
+            self.ml_logger_prefix = self.cfg["prefix"] + "/" + self.cfg["run_name"] + "/" + self.cfg["experiment_name"]
+            logger.configure(root=self.cfg["root"], user=self.cfg["user"], prefix=self.ml_logger_prefix, silent=False)
 
 
         _, _ = self.env.reset()
@@ -286,7 +287,7 @@ class OnPolicyRunner:
             log_dict['tot_time'] = self.tot_time
 
         logger.store_metrics(log_dict)
-        #logger.log_metrics_summary(key_values=log_dict)
+        logger.log_metrics(log_dict)
 
         logger.log_params(Args=self.cfg)
 
@@ -306,17 +307,24 @@ class OnPolicyRunner:
 
         return ep_string
 
-
     def save(self, path, infos=None):
-        torch.save({
-            'model_state_dict': self.alg.actor_critic.state_dict(),
-            'optimizer_state_dict': self.alg.optimizer.state_dict(),
-            'iter': self.current_learning_iteration,
-            'infos': infos,
+        if self.cfg["use_ml_logger"]:
+            logger.save_torch(self.alg, path=self.ml_logger_prefix + f'/model_{self.current_learning_iteration}.pt')
+            logger.duplicate(self.ml_logger_prefix + f'/model_{self.current_learning_iteration}.pt',
+                             self.ml_logger_prefix + "/agent.pt")
+        else:
+            torch.save({
+                'model_state_dict': self.alg.actor_critic.state_dict(),
+                'optimizer_state_dict': self.alg.optimizer.state_dict(),
+                'iter': self.current_learning_iteration,
+                'infos': infos,
             }, path)
 
     def load(self, path, load_optimizer=True):
-        loaded_dict = torch.load(path)
+        if self.cfg["use_ml_logger"]:
+            loaded_dict = logger.load_torch(path=self.ml_logger_prefix + f'/agent.pt')
+        else:
+            loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
