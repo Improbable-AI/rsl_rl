@@ -364,7 +364,7 @@ class OnPolicyRunner:
             # return {}
             checkpoints = logger.glob(query="model_*.pt")
             print(checkpoints)
-            checkpoints.sort()
+            #checkpoints.sort()
             checkpoint = checkpoints[-1]
             print(checkpoint)
             loaded_dict = logger.load_pkl(checkpoint)[0]
