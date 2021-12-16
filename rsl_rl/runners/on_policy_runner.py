@@ -262,9 +262,9 @@ class OnPolicyRunner:
         return ep_string
 
     def log_ml_logger(self, locs, width=80, pad=35):
-        
+
         log_dict = {}
-        log_dict['it'] = locs['it']
+        log_dict['iterations'] = locs['it']
 
         ep_string = f''
         if locs['ep_infos']:
@@ -278,38 +278,34 @@ class OnPolicyRunner:
                         ep_info[key] = ep_info[key].unsqueeze(0)
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
-                log_dict['Episode/' + key] =  float(value)
+                log_dict['episode/' + key] = float(value)
                 ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
-        log_dict['Loss/value_function'] = locs['mean_value_loss']
-        log_dict['Loss/surrogate'] = locs['mean_surrogate_loss']
-        log_dict['Loss/learning_rate'] = self.alg.learning_rate
-        log_dict['Policy/mean_noise_std'] = mean_std.item()
-        log_dict['Perf/total_fps'] = fps
-        log_dict['Perf/collection time'] = locs['collection_time']
-        log_dict['Perf/learning_time'] = locs['learn_time']
-        
+        log_dict['loss/value_function'] = locs['mean_value_loss']
+        log_dict['loss/surrogate'] = locs['mean_surrogate_loss']
+        log_dict['loss/learning_rate'] = self.alg.learning_rate
+        log_dict['policy/mean_noise_std'] = mean_std.item()
+        log_dict['performance/total_fps'] = fps
+        log_dict['performance/collection time'] = locs['collection_time']
+        log_dict['performance/learning_time'] = locs['learn_time']
+
         if len(locs['rewbuffer']) > 0:
-            log_dict['Train/mean_reward'] = statistics.mean(locs['rewbuffer'])
-            log_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
-            log_dict['Train/mean_reward/time'] = statistics.mean(locs['rewbuffer'])
-            log_dict['Train/mean_episode_length/time'] = statistics.mean(locs['lenbuffer'])
-            log_dict['tot_time'] = self.tot_time
-
-        print(log_dict)
-
+            log_dict['train/mean_reward'] = statistics.mean(locs['rewbuffer'])
+            log_dict['train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
+            log_dict['train/mean_reward/time'] = statistics.mean(locs['rewbuffer'])
+            log_dict['train/mean_episode_length/time'] = statistics.mean(locs['lenbuffer'])
+            log_dict['total_time'] = self.tot_time
 
         logger.store_metrics(log_dict)
         logger.log(metrics=log_dict, flush=True)
 
-        #logger.log(metrics={"loss": locs['mean_value_loss'], "step":locs['it']}, flush=True)
+        # logger.log(metrics={"loss": locs['mean_value_loss'], "step":locs['it']}, flush=True)
 
-        #logger.log(metrics={"mean_value_loss": locs['mean_value_loss'], "it":locs['it']}, flush=True)
+        # logger.log(metrics={"mean_value_loss": locs['mean_value_loss'], "it":locs['it']}, flush=True)
 
-
-        #print(len(frames), locs['dones'][0:100], locs['dones'].shape)
+        # print(len(frames), locs['dones'][0:100], locs['dones'].shape)
 
         if self.cfg["save_video"] and locs['it'] - self.last_recording_it >= self.cfg["save_video_interval"]:
             self.env.start_recording()
@@ -320,10 +316,9 @@ class OnPolicyRunner:
         if len(frames) > 0:
             self.env.pause_recording()
             print("LOGGING VIDEO")
-            logger.save_video(frames, f"recording_{locs['it']}.mp4", fps=1/self.env.dt)
-            
+            logger.save_video(frames, f"videos/{locs['it']}.mp4", fps=1 / self.env.dt)
 
-        #logger.log(step=locs['it'], flush=True)
+        # logger.log(step=locs['it'], flush=True)
 
         logger.flush()
 
@@ -337,15 +332,12 @@ class OnPolicyRunner:
                 'optimizer_state_dict': self.alg.optimizer.state_dict(),
                 'iter': self.current_learning_iteration,
                 'infos': infos,
-                }, path=path)
-            #logger.save_module(self.alg.actor_critic, path=f'/model_state_dict_{self.current_learning_iteration}.pt')
-            #logger.save_module(self.alg.optimizer, path=f'/optimizer_state_dict_{self.current_learning_iteration}.pt')
-            #logger.duplicate(self.ml_logger_prefix + f'/model_state_dict_{self.current_learning_iteration}.pt',
-            #                 self.ml_logger_prefix + "/model_state_dict_last.pt")
-            #logger.duplicate(self.ml_logger_prefix + f'/optimizer_state_dict_{self.current_learning_iteration}.pt',
-            #                 self.ml_logger_prefix + "/optimizer_state_dict_last.pt")
-            logger.duplicate(path,
-                             "ckpt_last.pt")
+                'cfg': self.cfg,
+                'alg_cfg': self.alg_cfg,
+                'policy_cfg': self.policy_cfg,
+                'env_cfg': self.env.cfg,
+            }, path="ckpt_last.pt")
+            # logger.duplicate(path, "ckpt_last.pt")
         else:
             torch.save({
                 'model_state_dict': self.alg.actor_critic.state_dict(),
