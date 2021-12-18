@@ -106,7 +106,7 @@ class OnPolicyRunner:
 
             logger.log_params(Args=self.cfg)
 
-        _, _ = self.env.reset()
+        self.env.reset()
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
@@ -346,7 +346,7 @@ class OnPolicyRunner:
                 'infos': infos,
             }, path)
 
-    def load(self, path, load_optimizer=True):
+    def load(self, path="", load_optimizer=True):
         if self.cfg["use_ml_logger"]:
             # model_state_dict = logger.load_torch(path=f'/model_state_dict_last.pt')
             # self.alg.actor_critic.load_state_dict(model_state_dict)
