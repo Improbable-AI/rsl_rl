@@ -1,5 +1,6 @@
 from ppo import PPO
 import torch
+import torch.nn as nn
 
 class PPO_aux_loss(PPO):
 	def __init__(self,
@@ -20,7 +21,7 @@ class PPO_aux_loss(PPO):
                  device='cpu',
                  ):
 
-        super().__init__(actor_critic,
+            super().__init__(actor_critic,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -34,9 +35,9 @@ class PPO_aux_loss(PPO):
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
-                 )
+            )
 
-        self.aux_loss_coef = aux_loss_coef
+            self.aux_loss_coef = aux_loss_coef
 
     def update(self):
         mean_value_loss = 0

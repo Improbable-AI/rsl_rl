@@ -93,12 +93,12 @@ class OnPolicyRunner:
 
             logger.log_text("""
             charts: 
-            - yKey: Train/mean_reward
-              xKey: it
-            - yKey: Episode/rew_clipped_forward_progress
-              xKey: it
-            - yKey: Episode/terrain_level
-              xKey: it
+            - yKey: train/mean_reward
+              xKey: iterations
+            - yKey: episode/rew_clipped_global_forward_progress
+              xKey: iterations
+            - yKey: episode/terrain_level
+              xKey: iterations
             """,
             filename=".charts.yml",
             dedent=True,
